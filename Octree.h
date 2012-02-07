@@ -59,13 +59,8 @@ public:
 	Octree(){
 		memsz=siz;
 		mTreeRoot=(node*)pool;
-		N=1;
-		memset(mTreeRoot, 0, memsz);
-		mTreeRoot->N=0;
-
-		mTreeRoot->n=0;
 	}
-	~Octree(){free(mTreeRoot);}
+	~Octree(){}
 	void clear(){
 		N=1;
 		memset(pool, 0, memsz);
