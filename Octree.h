@@ -1,4 +1,41 @@
-
+#pragma once
+#include <cstdio>
+#include <cstdlib>
+char newix[]={4,2,1,5,3,8,6,8,3,7,8,8,8,6,5,8,7,8,8,8,7,8,8,8};
+typedef float __m128 __attribute__ (( vector_size(16), aligned(16) ));
+inline __m128 dpps_instr(__m128 x, __m128 y, const unsigned char mask){
+	__m128 retval;
+#ifdef SSE4
+	asm volatile(
+			"dpps $0xFF, %1, %2 \n\t"
+			"movaps %2, %0 \n\t"
+			: "=x"(retval)
+			:"x"(x), "x"(y)
+			);
+#else
+	asm volatile(
+				"mulps %1, %2 \n\t"
+				"haddps %2, %2 \n\t"
+				"haddps %2, %2 \n\t"
+				"movaps %1, %0 \n\t"
+				: "=x"(retval)
+				:"x"(x), "x"(y)
+				);
+#endif
+	return retval;
+}
+inline __m128 dpss_instr(__m128 x, __m128 y, const unsigned char mask){
+	__m128 retval;
+	asm volatile(
+			"mulss %1, %2 \n\t"
+			"phaddd %2, %2 \n\t"
+			"phaddd %2, %2 \n\t"
+			"movaps %2, %0 \n\t"
+			: "=x"(retval)
+			:"x"(x), "x"(y)
+			);
+	return retval;
+}
 template<unsigned char levels=9, unsigned int max_items=5, int siz=32*1024*1024> class Octree{
 public:
 	struct header{
@@ -182,9 +219,9 @@ public:
 			*t=0;
 			while(!((ndp=(traverseandget(o)))->n)){
 				float dst=(1<<ndp->level);
-				o[0]+=d[0]/dst;
-				o[1]+=d[1]/dst;
-				o[2]+=d[2]/dst;
+				o[0]+=d[0]/dst+0.001;
+				o[1]+=d[1]/dst+0.001;
+				o[2]+=d[2]/dst+0.001;
 				*t+=1./dst;
 				if(o[0]>1.) break;
 				if(o[1]>1.) break;
@@ -230,8 +267,8 @@ public:
 					"movaps %%xmm13, %1\n\t"
 					"movaps %3, %%xmm13\n\t"
 					"mulss %%xmm14, %%xmm13\n\t"
-					"phaddd %%xmm14, %%xmm13\n\t"
-					"phaddd %%xmm15, %%xmm13\n\t"
+					"phaddd %%xmm13, %%xmm13\n\t"
+					"phaddd %%xmm13, %%xmm13\n\t"
 					"movd %%xmm13, %4\n\t"
 					"subps %0, %5\n\t"
 					"divps %1, %5\n\t"
@@ -368,3 +405,4 @@ public:
 			}
 			return 1;
 		}
+};
