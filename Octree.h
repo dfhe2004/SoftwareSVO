@@ -42,8 +42,8 @@ public:
 		int size_x;
 		int size_y;
 	}; //we want to be able to treat the octree as a giant bounding volume, without polluting the cache with all this other stuff.
-	//and also without aliasing. 
-	
+	//and also without aliasing.
+
 	struct node{
 		unsigned int n;
 		short children_offset;
@@ -70,14 +70,14 @@ public:
 	inline node* traverseandget(float coords[4]){
 		node*   nd=mTreeRoot;
 
-		__m128 c=_mm_loadu_ps(coords);
+		__m128 c=_mm_load_ps(coords);
 		__m128 center=_mm_set1_ps(0.5);
 		for(unsigned char lvl=0; lvl<levels; ++lvl){
 			if(!(nd->children_offset)){
 							break;
 			}
 			unsigned ix;
-			__m128i indvec=_mm_set_epi32(1,2,4,0); //check endianness
+			__m128i indvec=__extension__ (__m128i)(__v4si){ 0, 4, 2, 1 };
 					asm volatile(
 							"movaps %1, %%xmm7\n\t"
 							"cmpleps %2, %%xmm7\n\t"
@@ -135,18 +135,6 @@ public:
 	}
 	char* filedata;
 	int offset0;
-	inline void mapfile(const char* filename, size_t filesize){
-
-					CreateFileMapping ((HANDLE)0xFFFFFFFF,
-		                                    NULL,
-		                                    PAGE_READWRITE,
-		                                    0,
-		                                    filesize,
-		                                    filename);
-					filedata=(char*) OpenFileMapping (FILE_MAP_WRITE,
-		                                FALSE,
-		                                filename);
-	}
 	inline node* addsomething(float coords[4], char dat[15]){
 				node *  ndp=traverseandget(coords);
 				node nd=*ndp;
@@ -214,9 +202,9 @@ public:
 			*t=0;
 			while(!((ndp=(traverseandget(o)))->n)){
 				float dst=(1<<ndp->level);
-				o[0]+=d[0]/dst+0.001;
-				o[1]+=d[1]/dst+0.001;
-				o[2]+=d[2]/dst+0.001;
+				o[0]+=d[0]/dst;
+				o[1]+=d[1]/dst;
+				o[2]+=d[2]/dst;
 				*t+=1./dst;
 				if(o[0]>1.) break;
 				if(o[1]>1.) break;
@@ -227,7 +215,7 @@ public:
 		inline int rayparam(volatile register __m128 min,  volatile register __m128 max,  volatile register __m128 sz, volatile register __m128 d, volatile register  __m128 o, volatile register __m128 a, unsigned char plane, float* t, node** hit){
 			unsigned cmp[4]={0,0,0,0};
 			unsigned a0=0;
-			volatile register __m128 mask=_mm_set_ps(0.,4.,2.,1);
+			volatile register __m128 mask=__extension__ (__m128)(__v4sf){ 0.,4.,2.,1.};
 			__asm volatile (
 					"xorps %%xmm15,%%xmm15\n\t"
 					"movaps %0, %%xmm14\n\t"
@@ -262,8 +250,8 @@ public:
 					"movaps %%xmm13, %1\n\t"
 					"movaps %3, %%xmm13\n\t"
 					"mulss %%xmm14, %%xmm13\n\t"
-					"phaddd %%xmm13, %%xmm13\n\t"
-					"phaddd %%xmm13, %%xmm13\n\t"
+					"phaddd %%xmm14, %%xmm13\n\t"
+					"phaddd %%xmm15, %%xmm13\n\t"
 					"movd %%xmm13, %4\n\t"
 					"subps %0, %5\n\t"
 					"divps %1, %5\n\t"
@@ -318,16 +306,17 @@ public:
 			if(!cmp[1]){
 				return procsubtree(min, max, mTreeRoot, (unsigned char) a0, plane, t, hit);
 			}
+			return 0;
 		}
 
 		inline int procsubtree(volatile register __m128 t0, volatile register __m128 t1, node* ndp, int a, int plane, float* t, node** hit){
-			
+
 			int ix;
 			node nd=*ndp;
 			__m128 zero=_mm_setzero_ps();
-			__m128 test=_mm_and_ps(_mm_set1_ps(1.0),_mm_cmplt_ps(t1, zero));
+			__m128 test=_mm_and_ps(_mm_set1_ps(1.0), _mm_cmplt_ps(t1, zero));
 			int r;
-			register __m128 outval=dpss_instr(test,test, 0xff);
+			register __m128 outval=dpss_instr(test,test);
 			asm volatile(
 										"movd %1, %0 \n \t"
 										: "=r"(r)
@@ -355,28 +344,12 @@ public:
 			float t0f[4], tmf[4];
 			_mm_store_ps(t0f,t0);
 			_mm_store_ps(tmf,tm);
-			ix=0;
-			  int x=(t0f[1] < t0f[0]);
-			                      int xy= x*(t0f[2] < t0f[1]);
-
-			                               // ty0 < tx0 && tz0 < tx0
-			                               // YZ plane
-			                      	  	 ix |= 2*(tmf[1] < t0f[0])*xy;
-			                               ix |= 1*(tmf[2] < t0f[0])*xy;
-
-
-			                       int xz=x*(tmf[2] < t0f[1]);
-			                               // tx0 <= ty0 && tz0 < ty0
-			                               // XZ plane
-			                               ix |= 4*(tmf[0] < t0f[1])*xz;
-			                               ix |= 1*(tmf[2] < t0f[0])*xz;
-
-
-			               // XY plane
-			               ix |= 4*(tmf[0] < t0f[2])*!x;
-			               ix |= (tmf[1] < t0f[2])*2*!x;
+			ix=(!plane)*((tmf[0]<t0f[2])+(tmf[0]<t0f[2])<<1);
+			ix+=(plane==1)*((tmf[0]<t0f[1])+(tmf[2]<t0f[1])<<2);
+			ix+=(plane==2)*((tmf[1]<t0f[0])<<1+(tmf[2]<t0f[0])<<2);
 			while(ix<8){
-					__m128i mask=_mm_set_epi32(0,(ix&1)*0xffffffff,(ix&2)*0xffffffff,(ix&4)*0xffffffff);
+					register const int z=(ix&1)*0xffffffff, y=(ix&2)*0xffffffff, x=(ix&4)*0xffffffff;
+					__m128i mask=__extension__ (__m128i)(__v4si){0,z,y,x};
 					asm volatile(
 							"movaps %2, %%xmm13\n\t"
 							"movdqa %0, %%xmm0\n\t"
@@ -400,4 +373,5 @@ public:
 			}
 			return 1;
 		}
-};
+
+	};
