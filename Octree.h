@@ -1,9 +1,4 @@
-
-struct OctreeBV{
-	int size_x;
-	int size_y;
-	int* objects; //c-style cast to this from below == dirty fun :D
-};
+#define SSE42 (comment out on systems not supporting "blendvps")
 template<unsigned char levels=9, unsigned int max_items=5, int siz=32*1024*1024> class Octree{
 public:
 	struct header{
@@ -376,24 +371,47 @@ public:
 
 			__builtin_expect(ix<8, 1);
 			while(ix<8){
-					register const int z=(ix&1)*0xffffffff, y=(ix&2)*0xffffffff, x=(ix&4)*0xffffffff;
-					__m128 mask=__extension__ (__m128)(__v4si){0,z,y,x};
+					while(ix<8){
+#ifdef SSE42
+				register const int z=(ix&1)*0xffffffff, y=(ix&2)*0xffffffff, x=(ix&4)*0xffffffff;
+									__m128 mask=__extension__ (__m128)(__v4si){0,z,y,x};
+									asm volatile(
+											"movaps %2, %%xmm13\n\t"
+											"movaps %0, %%xmm0\n\t"
+											"blendvps %%xmm13, %1 \n\t"
+											:
+											: "Yz"(mask), "x" (t0), "x"(tm)
+										);
+									asm volatile(
+											"movaps %1, %%xmm14\n\t"
+											"movaps %0, %%xmm0\n\t"
+											"xorps %%xmm15, %%xmm15\n\t"
+											"cmpeqss %%xmm15, %%xmm0 \n\t"
+											"blendvps %%xmm14, %2 \n\t"
+											:
+											: "Yz"(mask), "x" (t0), "x"(tm)
+									);
+#else
+					register const int z=(ix&1), y=(ix&2), x=(ix&4);
+					__m128 mask=__extension__ (__m128)(__v4si){0,!z*0xffff00+2,!y*0xffff00+1,!x*0xffff00};
+					__m128 mask1=__extension__ (__m128)(__v4si){0,z*0xffff00+2,y*0xffff00+1,x*0xffff00};
 					asm volatile(
-							"movaps %2, %%xmm13\n\t"
-							"movaps %0, %%xmm0\n\t"
-							"blendvps %%xmm13, %1 \n\t"
-							:
-							: "Yz"(mask), "x" (t0), "x"(tm)
-						);
-					asm volatile(
+							"movaps %0, %%xmm13\n\t"
 							"movaps %1, %%xmm14\n\t"
-							"movaps %0, %%xmm0\n\t"
-							"xorps %%xmm15, %%xmm15\n\t"
-							"cmpeqss %%xmm15, %%xmm0 \n\t"
-							"blendvps %%xmm14, %2 \n\t"
+							"movaps %0, %%xmm12\n\t"
+							"movaps %1, %%xmm15\n\t"
+							"pshufb %2, %%xmm13 \n\t"
+							"pshufb %3, %%xmm14 \n\t"
+							"pshufb %3, %%xmm12 \n\t"
+							"pshufb %2, %%xmm15 \n\t"
+							"addps %%xmm13, %%xmm14\n\t"
+							"addps %%xmm12, %%xmm15\n\t"
+							"movaps %%xmm14, %0\n\t"
+							"movaps %%xmm15, %1\n\t"
 							:
-							: "Yz"(mask), "x" (t0), "x"(tm)
-					);
+							:  "x" (t0), "x"(tm), "x"(mask), "x"(mask1)
+						);
+#endif
 					int newhit=procsubtree(t0, tm, &(ndp[nd.children_offset+(ix^a)]), a, plane, t, hit);
 					__builtin_expect(!newhit, 1);
 					if(!newhit) return 0;
