@@ -1,41 +1,9 @@
-#pragma once
-#include <cstdio>
-#include <cstdlib>
-char newix[]={4,2,1,5,3,8,6,8,3,7,8,8,8,6,5,8,7,8,8,8,7,8,8,8};
-typedef float __m128 __attribute__ (( vector_size(16), aligned(16) ));
-inline __m128 dpps_instr(__m128 x, __m128 y, const unsigned char mask){
-	__m128 retval;
-#ifdef SSE4
-	asm volatile(
-			"dpps $0xFF, %1, %2 \n\t"
-			"movaps %2, %0 \n\t"
-			: "=x"(retval)
-			:"x"(x), "x"(y)
-			);
-#else
-	asm volatile(
-				"mulps %1, %2 \n\t"
-				"haddps %2, %2 \n\t"
-				"haddps %2, %2 \n\t"
-				"movaps %1, %0 \n\t"
-				: "=x"(retval)
-				:"x"(x), "x"(y)
-				);
-#endif
-	return retval;
-}
-inline __m128 dpss_instr(__m128 x, __m128 y, const unsigned char mask){
-	__m128 retval;
-	asm volatile(
-			"mulss %1, %2 \n\t"
-			"phaddd %2, %2 \n\t"
-			"phaddd %2, %2 \n\t"
-			"movaps %2, %0 \n\t"
-			: "=x"(retval)
-			:"x"(x), "x"(y)
-			);
-	return retval;
-}
+
+struct OctreeBV{
+	int size_x;
+	int size_y;
+	int* objects; //c-style cast to this from below == dirty fun :D
+};
 template<unsigned char levels=9, unsigned int max_items=5, int siz=32*1024*1024> class Octree{
 public:
 	struct header{
@@ -77,7 +45,7 @@ public:
 							break;
 			}
 			unsigned ix;
-			__m128i indvec=__extension__ (__m128i)(__v4si){ 0, 4, 2, 1 };
+			__m128 indvec=__extension__ (__m128)(__v4si){ 0, 4, 2, 1 };
 					asm volatile(
 							"movaps %1, %%xmm7\n\t"
 							"cmpleps %2, %%xmm7\n\t"
@@ -303,6 +271,7 @@ public:
 			_mm_store_ps(testf, test);
 			_mm_store_ps(af, a);
 			*/
+			__builtin_expect(!cmp[1],1);
 			if(!cmp[1]){
 				return procsubtree(min, max, mTreeRoot, (unsigned char) a0, plane, t, hit);
 			}
@@ -310,25 +279,34 @@ public:
 		}
 
 		inline int procsubtree(volatile register __m128 t0, volatile register __m128 t1, node* ndp, int a, int plane, float* t, node** hit){
-
+			__builtin_expect(!(ndp->children_offset), false);
 			int ix;
 			node nd=*ndp;
 			__m128 zero=_mm_setzero_ps();
 			__m128 test=_mm_and_ps(_mm_set1_ps(1.0), _mm_cmplt_ps(t1, zero));
 			int r;
-			register __m128 outval=dpss_instr(test,test);
 			asm volatile(
+										"phaddd %1, %1;"
+										"phaddd %1, %1;"
 										"movd %1, %0 \n \t"
 										: "=r"(r)
-										: "x" (outval)
+										: "x" (test)
 										:
 								);
 
 			int ret=(r>0);
-			__m128 two=_mm_set1_ps(2.0);
-			__m128 tm=_mm_div_ps(_mm_add_ps(t0,t1),two);
+			__builtin_expect(ret, 0);
+			__m128 tm=_mm_setzero_ps();
+			__asm volatile("mov $0x3840000, %%eax;"
+					" movd %%eax, %%xmm0; "
+					"movaps %1, %2; "
+					"addps %0, %2; "
+					"mulps  %%xmm0, %2;"
+					:
+					:"x"(t0),"x"(t1),"x"(tm));
 
-				if(ndp->children_offset==0){
+
+				if(!(ndp->children_offset)){
 					if(ndp->n>0){
 						if(*hit==NULL){
 							_mm_store_ps(t, tm);
@@ -341,35 +319,102 @@ public:
 				if(ret){
 					return 1;
 				}
-			float t0f[4], tmf[4];
-			_mm_store_ps(t0f,t0);
-			_mm_store_ps(tmf,tm);
-			ix=(!plane)*((tmf[0]<t0f[2])+(tmf[0]<t0f[2])<<1);
-			ix+=(plane==1)*((tmf[0]<t0f[1])+(tmf[2]<t0f[1])<<2);
-			ix+=(plane==2)*((tmf[1]<t0f[0])<<1+(tmf[2]<t0f[0])<<2);
+
+				__m128 mask11=__extension__ (__m128)(__v4si){3,0,0,1};
+
+				__m128 mask22=__extension__ (__m128)(__v4si){3,2,2,0};
+				__m128 mask33=__extension__ (__m128)(__v4si){0,1,2,4};
+				__m128 mask44=__extension__ (__m128)(__v4si){0,1, 0, 0};
+			asm volatile("movaps %1, %%xmm0;"
+					"movaps %1, %%xmm2;"
+					"movaps %2, %%xmm3;"
+					"pshufb %3, %%xmm2;"
+					"pshufb %4, %%xmm3;"
+					"movaps %%xmm2, %%xmm4;"
+					"movaps %%xmm2, %%xmm1;"
+					"movaps %%xmm2, %%xmm7;"
+					"cmpltps %%xmm1, %%xmm2;"
+					"cmpltps %%xmm0, %%xmm3;"
+					"cmpltps %2, %%xmm1;"
+					"mov $1, %%eax;"
+					"movd %%eax, %%xmm5;"
+					"shufps $0, %%xmm5, %%xmm5;"
+					"cmpltps %1, %%xmm4;"
+					"cmpltps %2, %%xmm7;"
+					"andps %%xmm5, %%xmm2;"
+					"andps %%xmm5, %%xmm3;"
+					"andps %%xmm5, %%xmm1;"
+					"andps %%xmm5, %%xmm4;"
+					"andps %%xmm5, %%xmm7;"
+					"andps %%xmm1, %%xmm7;"
+					"andps %%xmm1, %%xmm4;"
+					"xorps %6, %%xmm4;"
+					"movaps %%xmm7, %%xmm15;"
+					"andps %6, %%xmm7;"
+					"shufps $0x1b, %6, %6;"
+					"orps %6, %%xmm1;"
+					"xorps %%xmm5, %%xmm1;"
+					"andps %6, %%xmm15;"
+					"mulss  %5, %%xmm15;"
+					"mulss %5, %%xmm7;"
+					"mulss %5, %%xmm4;"
+					"mulss %5, %%xmm1;"
+					"xorps %%xmm0, %%xmm0;"
+					"orps %%xmm0, %%xmm1;"
+					"orps %%xmm0, %%xmm7;"
+					"orps %%xmm0, %%xmm4;"
+					"orps %%xmm0, %%xmm15;"
+					"shufps $0x39, %%xmm0, %%xmm1;"
+					"orps %%xmm0, %%xmm1;"
+					"shufps $0x39, %%xmm1, %%xmm2;"
+					"orps %%xmm1, %%xmm2;"
+					"movd %%xmm2, %0;"
+					:"=r"(ix)
+					:"x"(t0),"x"(tm), "x"(mask11), "x"(mask22), "x"(mask33), "x"(mask44)
+				);
+
+
+			__builtin_expect(ix<8, 1);
 			while(ix<8){
 					register const int z=(ix&1)*0xffffffff, y=(ix&2)*0xffffffff, x=(ix&4)*0xffffffff;
-					__m128i mask=__extension__ (__m128i)(__v4si){0,z,y,x};
+					__m128 mask=__extension__ (__m128)(__v4si){0,z,y,x};
 					asm volatile(
 							"movaps %2, %%xmm13\n\t"
-							"movdqa %0, %%xmm0\n\t"
+							"movaps %0, %%xmm0\n\t"
 							"blendvps %%xmm13, %1 \n\t"
 							:
 							: "Yz"(mask), "x" (t0), "x"(tm)
 						);
 					asm volatile(
 							"movaps %1, %%xmm14\n\t"
-							"movdqa %0, %%xmm0\n\t"
+							"movaps %0, %%xmm0\n\t"
 							"xorps %%xmm15, %%xmm15\n\t"
 							"cmpeqss %%xmm15, %%xmm0 \n\t"
 							"blendvps %%xmm14, %2 \n\t"
 							:
 							: "Yz"(mask), "x" (t0), "x"(tm)
 					);
-					if(!(procsubtree(t0, tm, &(ndp[nd.children_offset+(ix^a)]), a, plane, t, hit)))
-						return 0;
-					plane=(t0f[1]>t0f[0])+(t0f[2]>t0f[1]);
+					int newhit=procsubtree(t0, tm, &(ndp[nd.children_offset+(ix^a)]), a, plane, t, hit);
+					__builtin_expect(!newhit, 1);
+					if(!newhit) return 0;
+
+					volatile register __m128 mask2=__extension__ (__m128)(__v4si){0xff,0xff,2,1};
+
+					__asm("movaps %1, %%xmm0; "
+							"pshufb %2, %%xmm0;"
+							" cmpltps %1, %%xmm0; "
+							"mov $0x3f800000, %%eax;"
+							" movd %%eax, %2; "
+							"andps %2, %%xmm0; "
+							" phaddd %%xmm0, %%xmm0; "
+							"phaddd %%xmm0, %%xmm0; "
+							"movd %%xmm0, %0"
+							:"=r"(plane)
+							:"x"(t0),"x"(mask2)
+							 );
+
 					ix=newix[plane+ix*3];
+					__builtin_expect(ix<8, 1);
 			}
 			return 1;
 		}
