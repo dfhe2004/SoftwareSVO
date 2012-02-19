@@ -1,4 +1,4 @@
-#define SSE42 (comment out on systems not supporting "blendvps")
+#define SSE42 //(comment out on systems not supporting "blendvps")
 template<unsigned char levels=9, unsigned int max_items=5, int siz=32*1024*1024> class Octree{
 public:
 	struct header{
@@ -370,7 +370,6 @@ public:
 
 
 			__builtin_expect(ix<8, 1);
-			while(ix<8){
 					while(ix<8){
 #ifdef SSE42
 				register const int z=(ix&1)*0xffffffff, y=(ix&2)*0xffffffff, x=(ix&4)*0xffffffff;
