@@ -2,14 +2,15 @@
 
 Maintainer and Author: Kevin Daley <stillhorse@gmail.com>, <github.com/vpostman>
 
-This is the header file for my Sparse Voxel Octree class.  Currently raycasting has some smallish math errors, but the overall thing seems to work.
-On a midrange Nehalem, insertion and traversal take less than half a second for datasets of up to 65536 elements; 65536 optimized raycasts take about 8ms, and naive raycasts are slow as hell (don't use them ;P).  
+This is the header file for my Sparse Voxel Octree class.  Currently functional and fairly stable.  Supports SSE3 and 4 with experimental ARM NEON support in the pipeline; unfortunately for now I have no device to test that on.
+It should be fairly cross-platform now that it has support for an intrinsics fallback.  That said, I still haven't tried it in 32-bit mode.  AFAIK there is no real OS-specific stuff.
+On a midrange Westmere, insertion and traversal take less than half a second for datasets of up to 65536 elements; 65536 optimized raycasts take about 8ms, and naive raycasts are slow as hell (don't use them ;P).  
 The layout uses a pool allocator with nodes stored in blocks of 8.  Nodes are an even 32 bytes == half of a cache line; nehalem and other intel processors with inclusive caches invalidate L1 and L2 a lot, so we need to be careful there.
 Pointers to the next nodes down are stored as indices into the pool with type "short" (not "unsigned short"; frequently data in sparse voxel sets is fractal somehow, so we'll let children point to parents).  
 The default traversal, using traverseandget, has a simple mechanism; you'll see if you optimize the branches out of child index computation that it amounts to:
 index_child=1*(x_coordinate>x_center)+2*(y_coordinate>y_center)+4*(z_coordinate>z_center);
-This is a dot product of (1,2,4) and a cmpgt, and as such is trivial to vectorize.  Then just keep adding child_offset + index_child until child_offset is zero, each time recomputing the node center (in assembler of course).  It's slightly more complicated than that, because of ieee754 issues and since cmpgtps uses NaN as true.   But it was easy to figure out from there.
-Parametric raycasting is a straightforward SSE4.2/assembly rewrite of "A Fast Algorithm for Parametric Octree Traversal", taking into account the errata ofc.  It still doesn't /quite/ work, but whatever's left to fix is miniscule to be sure (least that's what the register view in eclipse says).  Unfortunately, the code will forever remain SSE4.2-exclusive, as blendvps provided the only way to optimize out the switch statement/case labels without reloading all vectors from the stack. Sorry about that, late adopters ;P.
+This is a dot product of (1,2,4) and a normalized cmpgt, and as such is trivial to vectorize.  Then just keep adding child_offset + index_child until child_offset is zero, each time recomputing the node center (in assembler of course).  It's slightly more complicated than that, because of ieee754 issues and since cmpgtps uses NaN as true.   But it was easy to figure out from there.
+ Raycasting is just a straight rewrite of "A Fast Algorithm for Parametric Octree Traversal", taking into account the errata ofc.  It seems to pass a basic set of unit tests, but if you encounter problems let me know.
 If you have questions, or interesting profile data, or bugs, send me an email at the address above.
 Cheers!
 --Kevin
